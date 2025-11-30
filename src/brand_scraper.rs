@@ -72,31 +72,59 @@ pub fn fetch_all_brands() -> Result<Vec<Brand>, Box<dyn Error>> {
 
 /// Fetch all phones for a specific brand
 pub fn fetch_phones_by_brand(brand_slug: &str) -> Result<Vec<PhoneListItem>, Box<dyn Error>> {
+    fetch_phones_by_brand_paginated(brand_slug, usize::MAX)
+}
+
+/// Fetch phones for a specific brand with pagination support and max limit
+pub fn fetch_phones_by_brand_paginated(brand_slug: &str, max_phones: usize) -> Result<Vec<PhoneListItem>, Box<dyn Error>> {
     let mut all_phones = Vec::new();
-    let mut page = 1;
+    let mut page = 1; // Start with page 1
     
     loop {
+        if all_phones.len() >= max_phones {
+            break;
+        }
+        
+        // GSMArena pagination format:
+        // Page 1: brand-phones-48.php
+        // Page 2: brand-phones-48-p2.php  
+        // Page 3: brand-phones-48-p3.php
         let url = if page == 1 {
             format!("https://www.gsmarena.com/{}.php", brand_slug)
         } else {
-            format!("https://www.gsmarena.com/{}-f-{}-0.php", brand_slug, page)
+            format!("https://www.gsmarena.com/{}-p{}.php", brand_slug, page)
         };
         
-        let response = blocking::get(&url)?;
+        // Add delay before request to avoid rate limiting
+        if page > 1 {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        
+        let response = match blocking::get(&url) {
+            Ok(r) => r,
+            Err(_) => break,
+        };
+        
         if response.status() != 200 {
             break;
         }
         
-        let body = response.text()?;
+        let body = match response.text() {
+            Ok(b) => b,
+            Err(_) => break,
+        };
+        
         let document = Html::parse_document(&body);
         
         let phone_selector = Selector::parse("div.makers ul li a").unwrap();
         let img_selector = Selector::parse("img").unwrap();
         
-        let mut found_phones = false;
+        let page_start_count = all_phones.len();
         
         for element in document.select(&phone_selector) {
-            found_phones = true;
+            if all_phones.len() >= max_phones {
+                break;
+            }
             
             if let Some(href) = element.value().attr("href") {
                 let name = element.text().collect::<String>().trim().to_string();
@@ -127,14 +155,12 @@ pub fn fetch_phones_by_brand(brand_slug: &str) -> Result<Vec<PhoneListItem>, Box
             }
         }
         
-        if !found_phones {
+        // If no new phones found on this page, we've reached the end
+        if all_phones.len() == page_start_count {
             break;
         }
         
         page += 1;
-        
-        // Small delay to be respectful to the server
-        std::thread::sleep(std::time::Duration::from_millis(200));
     }
     
     Ok(all_phones)
