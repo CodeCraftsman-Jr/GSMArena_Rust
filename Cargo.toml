@@ -8,7 +8,7 @@ gsmarena = "0.1.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 scraper = "0.17"
-reqwest = { version = "0.11", features = ["blocking"] }
+reqwest = { version = "0.11", features = ["blocking", "socks", "json"] }
 regex = "1.10"
 mongodb = "2.8"
 tokio = { version = "1.35", features = ["full"] }
@@ -16,3 +16,4 @@ dotenv = "0.15"
 chrono = { version = "0.4", features = ["serde"] }
 rayon = "1.8"
 futures = "0.3"
+rand = "0.8"
