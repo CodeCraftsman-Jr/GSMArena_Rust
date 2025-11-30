@@ -1,9 +1,9 @@
 name: Scrape GSMArena Phones to MongoDB
 
 on:
-  # Run on schedule (daily at 2 AM UTC)
+  # Run on schedule (weekly on Sunday at 2 AM UTC)
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * 0'
   
   # Allow manual trigger from GitHub Actions UI
   workflow_dispatch:
