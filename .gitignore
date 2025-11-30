@@ -1,0 +1,24 @@
+# Rust build artifacts
+target/
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files
+*.json
+!Cargo.json
+phone_details.json
+*_phones.json
+multi_brand_comparison.json
+
+# Logs
+*.log
