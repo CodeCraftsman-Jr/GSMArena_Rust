@@ -2,6 +2,12 @@
 target/
 Cargo.lock
 
+# Environment variables - DO NOT COMMIT
+.env
+
+# Scraped data
+scraped_data/
+
 # IDE
 .vscode/
 .idea/

@@ -1,0 +1,101 @@
+name: Scrape GSMArena Phones to MongoDB
+
+on:
+  # Run on schedule (daily at 2 AM UTC)
+  schedule:
+    - cron: '0 2 * * *'
+  
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      max_brands:
+        description: 'Maximum number of brands to scrape (leave empty for all)'
+        required: false
+        default: ''
+      phones_per_brand:
+        description: 'Maximum phones per brand (leave empty for all)'
+        required: false
+        default: ''
+      collection_name:
+        description: 'MongoDB collection name'
+        required: false
+        default: 'gsmarena_phones'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  scrape-and-upload:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache build artifacts
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-
+
+      - name: Build release binary
+        run: cargo build --release --bin scrape_to_mongodb
+
+      - name: Run scraper and upload to MongoDB
+        env:
+          MONGO_DB_USERNAME: ${{ secrets.MONGO_DB_USERNAME }}
+          MONGO_DB_PASSWORD: ${{ secrets.MONGO_DB_PASSWORD }}
+          MONGO_DB_DATABASE_NAME: ${{ secrets.MONGO_DB_DATABASE_NAME }}
+          MONGO_DB_DOMAIN_NAME: ${{ secrets.MONGO_DB_DOMAIN_NAME }}
+          COLLECTION_NAME: ${{ github.event.inputs.collection_name || 'gsmarena_phones' }}
+          MAX_BRANDS: ${{ github.event.inputs.max_brands || '' }}
+          PHONES_PER_BRAND: ${{ github.event.inputs.phones_per_brand || '' }}
+          SKIP_EXISTING: 'true'
+        run: |
+          # Run the scraper
+          if [ -n "$MAX_BRANDS" ] && [ -n "$PHONES_PER_BRAND" ]; then
+            ./target/release/scrape_to_mongodb "$MAX_BRANDS" "$PHONES_PER_BRAND"
+          elif [ -n "$MAX_BRANDS" ]; then
+            ./target/release/scrape_to_mongodb "$MAX_BRANDS"
+          else
+            ./target/release/scrape_to_mongodb
+          fi
+
+      - name: Upload scraping logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: scraping-logs-${{ github.run_number }}
+          path: |
+            *.log
+          retention-days: 7
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Scraping job failed. Check the logs for details."

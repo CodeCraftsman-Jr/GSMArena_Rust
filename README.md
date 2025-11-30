@@ -1,6 +1,6 @@
 # GSMArena Rust Scraper
 
-A Rust-based phone specification scraper using the [gsmarena](https://crates.io/crates/gsmarena) crate with additional web scraping capabilities to fetch all brands and phones.
+A Rust-based phone specification scraper using the [gsmarena](https://crates.io/crates/gsmarena) crate with additional web scraping capabilities to fetch all brands and phones. Now with **MongoDB integration** and **GitHub Actions** support for automated scraping!
 
 ## Features
 
@@ -8,10 +8,17 @@ A Rust-based phone specification scraper using the [gsmarena](https://crates.io/
 - 🏢 Scrape all brands from GSMArena
 - 📋 Get complete phone lists for any brand
 - 🌍 Scrape entire database (all brands and phones)
-- 💾 Save results to JSON files
-- 🚀 Synchronous, easy-to-use API
+- 💾 Save results to JSON files or MongoDB
+- 🔄 **Automated scraping with GitHub Actions**
+- 🗄️ **MongoDB integration for persistent storage**
+- 🚀 Synchronous and asynchronous API
 - 📊 Compare multiple phones
 - 🎯 Type-safe with Rust
+
+## Quick Links
+
+- **[GitHub Actions Setup Guide](GITHUB_ACTIONS_SETUP.md)** - Set up automated scraping
+- **[Quick Start Guide](QUICKSTART.md)** - Get started quickly
 
 ## Installation
 
@@ -27,6 +34,31 @@ cargo build --release
 ```
 
 ## Usage
+
+### 🔄 Automated Scraping with GitHub Actions (Recommended)
+
+Set up automated daily scraping to MongoDB:
+
+1. **Follow the [GitHub Actions Setup Guide](GITHUB_ACTIONS_SETUP.md)**
+2. Configure MongoDB credentials as GitHub Secrets
+3. The workflow runs automatically daily at 2 AM UTC
+4. Or trigger manually from the Actions tab
+
+### 🗄️ Scrape to MongoDB
+
+Run the MongoDB scraper locally:
+
+```bash
+# Copy and configure .env file
+cp .env.example .env
+# Edit .env with your MongoDB credentials
+
+# Run the scraper (stores in MongoDB)
+cargo run --bin scrape_to_mongodb
+
+# Limit to specific brands/phones
+cargo run --bin scrape_to_mongodb 5 10  # 5 brands, 10 phones each
+```
 
 ### 1. Fetch All Brands and Their Phone Lists
 ```bash
@@ -172,6 +204,49 @@ scraped_data/
 - `scraper` - HTML parsing
 - `reqwest` - HTTP client (blocking)
 - `regex` - Pattern matching
+- `mongodb` - MongoDB driver for Rust
+- `tokio` - Async runtime
+- `dotenv` - Environment variable management
+- `chrono` - Date/time handling
+
+## MongoDB Integration
+
+### Environment Variables
+
+Create a `.env` file:
+
+```bash
+MONGO_DB_USERNAME=your_username
+MONGO_DB_PASSWORD=your_password
+MONGO_DB_DATABASE_NAME=your_database
+MONGO_DB_DOMAIN_NAME=your_cluster_domain
+COLLECTION_NAME=gsmarena_phones
+MAX_BRANDS=5              # Optional: limit brands
+PHONES_PER_BRAND=10       # Optional: limit phones per brand
+SKIP_EXISTING=true        # Skip phones already in database
+```
+
+### Document Structure
+
+Each phone is stored with:
+- `phone_id`: Unique GSMArena ID
+- `name`: Phone name
+- `brand`: Manufacturer
+- `url`: GSMArena URL
+- `image_url`: Phone image
+- `specifications`: Full spec JSON
+- `scraped_at`: Timestamp
+
+## GitHub Actions
+
+The project includes automated scraping via GitHub Actions:
+
+- **Schedule**: Runs daily at 2 AM UTC
+- **Manual**: Trigger from Actions tab with custom parameters
+- **Storage**: Results stored directly in MongoDB
+- **Monitoring**: View logs and artifacts in Actions tab
+
+See [GITHUB_ACTIONS_SETUP.md](GITHUB_ACTIONS_SETUP.md) for complete setup instructions.
 
 ## Performance Notes
 
