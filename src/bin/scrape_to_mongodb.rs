@@ -1,4 +1,5 @@
 use gsmarena_scraper::{fetch_all_brands, fetch_phones_by_brand, MongoDBClient, PhoneDocument};
+use gsmarena_scraper::mongodb::parse_specifications;
 use gsmarena;
 use serde_json;
 use std::error::Error;
@@ -127,6 +128,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             };
 
+            // Parse specifications into organized structure
+            let (network, launch, body, display, platform, memory, main_camera, selfie_camera, 
+                 sound, comms, features, battery, misc) = parse_specifications(&spec_json);
+
+            let now = Utc::now();
+            
             // Create phone document
             let phone_doc = PhoneDocument {
                 phone_id: phone.phone_id.clone(),
@@ -134,8 +141,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 brand: brand.name.clone(),
                 url: phone.url.clone(),
                 image_url: phone.image_url.clone(),
-                specifications: spec_json,
-                scraped_at: Utc::now(),
+                source: "gsmarena".to_string(),
+                network,
+                launch,
+                body,
+                display,
+                platform,
+                memory,
+                main_camera,
+                selfie_camera,
+                sound,
+                comms,
+                features,
+                battery,
+                misc,
+                specifications_raw: spec_json,
+                scraped_at: now,
+                updated_at: now,
+                version: 1,
             };
 
             // Insert into MongoDB
