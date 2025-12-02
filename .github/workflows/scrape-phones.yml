@@ -64,7 +64,7 @@ jobs:
             ${{ runner.os }}-cargo-build-
 
       - name: Build release binary
-        run: cargo build --release --bin scrape_to_mongodb
+        run: cargo build --release --bin scrape_to_mongodb_ratelimited
 
       - name: Run scraper and upload to MongoDB
         env:
@@ -76,14 +76,16 @@ jobs:
           MAX_BRANDS: ${{ github.event.inputs.max_brands || '' }}
           PHONES_PER_BRAND: ${{ github.event.inputs.phones_per_brand || '' }}
           SKIP_EXISTING: 'true'
+          DELAY_BETWEEN_PHONES_MS: '500'
+          DELAY_BETWEEN_BRANDS_MS: '3000'
         run: |
-          # Run the scraper
+          # Run the rate-limited scraper
           if [ -n "$MAX_BRANDS" ] && [ -n "$PHONES_PER_BRAND" ]; then
-            ./target/release/scrape_to_mongodb "$MAX_BRANDS" "$PHONES_PER_BRAND"
+            ./target/release/scrape_to_mongodb_ratelimited "$MAX_BRANDS" "$PHONES_PER_BRAND"
           elif [ -n "$MAX_BRANDS" ]; then
-            ./target/release/scrape_to_mongodb "$MAX_BRANDS"
+            ./target/release/scrape_to_mongodb_ratelimited "$MAX_BRANDS"
           else
-            ./target/release/scrape_to_mongodb
+            ./target/release/scrape_to_mongodb_ratelimited
           fi
 
       - name: Upload scraping logs as artifact
