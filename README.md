@@ -19,6 +19,7 @@ A Rust-based phone specification scraper using the [gsmarena](https://crates.io/
 
 - **[GitHub Actions Setup Guide](GITHUB_ACTIONS_SETUP.md)** - Set up automated scraping
 - **[Quick Start Guide](QUICKSTART.md)** - Get started quickly
+- **[ScrapingBee Scraper](SCRAPINGBEE_SCRAPER.md)** - Fast phone list scraping with API key rotation
 
 ## Installation
 
