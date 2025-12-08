@@ -1,0 +1,119 @@
+name: Scrape GSMArena Phones (ScrapingBee Hybrid)
+
+on:
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      max_brands:
+        description: 'Maximum number of brands to scrape (leave empty for all)'
+        required: false
+        default: ''
+      phones_per_brand:
+        description: 'Maximum phones per brand (leave empty for all)'
+        required: false
+        default: ''
+      collection_name:
+        description: 'MongoDB collection name'
+        required: false
+        default: 'gsmarena_phones'
+      hybrid_batch_size:
+        description: 'Hybrid batch size (phones per batch)'
+        required: false
+        default: '10'
+      scrapingbee_api_keys:
+        description: 'ScrapingBee API keys (comma-separated, or leave empty to use secret)'
+        required: false
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  scrape-and-upload:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-hybrid-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-hybrid-
+            ${{ runner.os }}-cargo-build-
+
+      - name: Build release binary
+        run: cargo build --release --bin scrape_phonelists_scrapingbee
+
+      - name: Run hybrid scraper with ScrapingBee
+        env:
+          MONGO_DB_USERNAME: ${{ secrets.MONGO_DB_USERNAME }}
+          MONGO_DB_PASSWORD: ${{ secrets.MONGO_DB_PASSWORD }}
+          MONGO_DB_DATABASE_NAME: ${{ secrets.MONGO_DB_DATABASE_NAME }}
+          MONGO_DB_DOMAIN_NAME: ${{ secrets.MONGO_DB_DOMAIN_NAME }}
+          COLLECTION_NAME: ${{ github.event.inputs.collection_name || 'gsmarena_phones' }}
+          MAX_BRANDS: ${{ github.event.inputs.max_brands || '' }}
+          PHONES_PER_BRAND: ${{ github.event.inputs.phones_per_brand || '' }}
+          SKIP_EXISTING: 'true'
+          DELAY_BETWEEN_PHONES_MS: '500'
+          HYBRID_BATCH_SIZE: ${{ github.event.inputs.hybrid_batch_size || '10' }}
+          # Use input keys if provided, otherwise use secret
+          SCRAPINGBEE_API_KEYS: ${{ github.event.inputs.scrapingbee_api_keys || secrets.SCRAPINGBEE_API_KEYS }}
+        run: |
+          # Run the hybrid scraper with ScrapingBee
+          if [ -n "$MAX_BRANDS" ] && [ -n "$PHONES_PER_BRAND" ]; then
+            ./target/release/scrape_phonelists_scrapingbee "$MAX_BRANDS" "$PHONES_PER_BRAND"
+          elif [ -n "$MAX_BRANDS" ]; then
+            ./target/release/scrape_phonelists_scrapingbee "$MAX_BRANDS"
+          else
+            ./target/release/scrape_phonelists_scrapingbee
+          fi
+
+      - name: Upload scraping logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraping-logs-hybrid-${{ github.run_number }}
+          path: |
+            *.log
+          retention-days: 7
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "::warning::Hybrid scraping job failed. Check logs for details."
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Scraping Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode**: Hybrid (Rate-limited + ScrapingBee)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Collection**: ${COLLECTION_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Batch Size**: ${HYBRID_BATCH_SIZE}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: $([ $? -eq 0 ] && echo '✅ Success' || echo '❌ Failed')" >> $GITHUB_STEP_SUMMARY

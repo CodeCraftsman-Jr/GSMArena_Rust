@@ -11,6 +11,18 @@ use mongodb::{Client as MongoClient, options::ClientOptions, bson::doc};
 use futures::stream::StreamExt;
 use chrono::Utc;
 
+#[derive(Debug, Serialize, Deserialize)]
+struct PhoneListEntry {
+    phone_id: String,
+    name: String,
+    brand: String,
+    url: String,
+    image_url: Option<String>,
+    is_complete: bool,
+    created_at: String,
+    updated_at: String,
+}
+
 #[derive(Debug, Clone)]
 struct ScrapingBeeClient {
     client: Client,
@@ -261,6 +273,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let collection_name = std::env::var("COLLECTION_NAME")
         .unwrap_or_else(|_| "gsmarena_phones".to_string());
     
+    let phone_list_collection_name = std::env::var("PHONE_LIST_COLLECTION_NAME")
+        .unwrap_or_else(|_| "gsmarena_phone_list".to_string());
+    
     let skip_existing = std::env::var("SKIP_EXISTING")
         .unwrap_or_else(|_| "true".to_string())
         .parse::<bool>()
@@ -277,7 +292,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(500);
 
     println!("Configuration:");
-    println!("  Collection: {}", collection_name);
+    println!("  Specs collection: {}", collection_name);
+    println!("  Phone list collection: {}", phone_list_collection_name);
     println!("  Max brands: {}", if max_brands == usize::MAX { "ALL".to_string() } else { max_brands.to_string() });
     println!("  Max phones per brand: {}", if phones_per_brand == usize::MAX { "ALL".to_string() } else { phones_per_brand.to_string() });
     println!("  Skip existing: {}", skip_existing);
@@ -310,17 +326,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let db = mongo_client.database(&database_name);
     let collection: mongodb::Collection<mongodb::bson::Document> = db.collection(&collection_name);
+    let phone_list_collection: mongodb::Collection<mongodb::bson::Document> = db.collection(&phone_list_collection_name);
     
     let initial_count = collection.count_documents(doc! {}, None).await.unwrap_or(0);
-    println!("Current phones in database: {}", initial_count);
+    let phone_list_count = phone_list_collection.count_documents(doc! {}, None).await.unwrap_or(0);
+    println!("Current phones in specs database: {}", initial_count);
+    println!("Current phones in list database: {}", phone_list_count);
     
-    // Fetch all existing phone IDs from MongoDB to skip them
-    print!("Loading existing phone IDs from database... ");
-    let mut existing_phone_ids = HashSet::new();
+    // Load phones marked as complete from phone list collection
+    print!("Loading complete phone IDs from phone list... ");
+    let mut complete_phone_ids = HashSet::new();
     
     if skip_existing {
-        let mut cursor = collection.find(
-            doc! {},
+        let mut cursor = phone_list_collection.find(
+            doc! { "is_complete": true },
             mongodb::options::FindOptions::builder()
                 .projection(doc! { "phone_id": 1, "_id": 0 })
                 .build()
@@ -329,12 +348,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         while let Some(result) = cursor.next().await {
             if let Ok(doc) = result {
                 if let Some(phone_id) = doc.get_str("phone_id").ok() {
-                    existing_phone_ids.insert(phone_id.to_string());
+                    complete_phone_ids.insert(phone_id.to_string());
                 }
             }
         }
         
-        println!("✓ Found {} existing phones to skip", existing_phone_ids.len());
+        println!("✓ Found {} complete phones to skip", complete_phone_ids.len());
     } else {
         println!("✓ Skip existing disabled");
     }
@@ -393,12 +412,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
             
             print!("    [{}/{}] {} ", display_index, display_total, phone.name);
 
-            // Check if phone already exists in our pre-loaded HashSet
-            if skip_existing && existing_phone_ids.contains(&phone.phone_id) {
-                println!("- Already exists, skipping");
+            // Check if phone is already marked as complete in phone list collection
+            if skip_existing && complete_phone_ids.contains(&phone.phone_id) {
+                println!("- Already complete, skipping");
                 stats.phones_skipped += 1;
                 continue;
             }
+            
+            // Save/update phone in phone list collection (incomplete initially)
+            let phone_list_entry = doc! {
+                "phone_id": &phone.phone_id,
+                "name": &phone.name,
+                "brand": &brand.name,
+                "url": &phone.url,
+                "image_url": phone.image_url.as_ref(),
+                "is_complete": false,
+                "created_at": Utc::now().to_rfc3339(),
+                "updated_at": Utc::now().to_rfc3339(),
+            };
+            
+            let _ = phone_list_collection.update_one(
+                doc! { "phone_id": &phone.phone_id },
+                doc! { "$set": phone_list_entry },
+                mongodb::options::UpdateOptions::builder().upsert(true).build()
+            ).await;
 
             // Determine method: alternate every batch_size phones
             if batch_counter >= batch_size {
@@ -509,6 +546,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 mongodb::options::UpdateOptions::builder().upsert(true).build()
             ).await {
                 Ok(_) => {
+                    // Mark as complete in phone list collection
+                    let _ = phone_list_collection.update_one(
+                        doc! { "phone_id": &phone.phone_id },
+                        doc! { "$set": { "is_complete": true, "updated_at": Utc::now().to_rfc3339() } },
+                        None,
+                    ).await;
+                    
+                    // Add to our in-memory set to skip in this run
+                    complete_phone_ids.insert(phone.phone_id.clone());
+                    
                     println!("✓");
                     stats.phones_inserted += 1;
                     phones_with_specs += 1;
@@ -525,6 +572,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let final_count = collection.count_documents(doc! {}, None).await.unwrap_or(0);
+    let final_list_count = phone_list_collection.count_documents(doc! {}, None).await.unwrap_or(0);
+    let complete_count = phone_list_collection.count_documents(doc! { "is_complete": true }, None).await.unwrap_or(0);
     
     println!("{}", "=".repeat(70));
     println!("✓ Scraping Complete!");
@@ -534,13 +583,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("  Brands failed: {}", stats.brands_failed);
     println!("  Total phones found: {}", stats.total_phones_found);
     println!("  Phones with specs saved: {}", stats.phones_inserted);
-    println!("  Phones skipped (existing): {}", stats.phones_skipped);
+    println!("  Phones skipped (complete): {}", stats.phones_skipped);
     println!("  Failed: {}", stats.phones_failed);
     println!("\nDatabase:");
-    println!("  Collection: {}", collection_name);
-    println!("  Previous count: {}", initial_count);
-    println!("  Current count: {}", final_count);
-    println!("  Net change: +{}", final_count as i64 - initial_count as i64);
+    println!("  Specs collection: {}", collection_name);
+    println!("    Previous count: {}", initial_count);
+    println!("    Current count: {}", final_count);
+    println!("    Net change: +{}", final_count as i64 - initial_count as i64);
+    println!("  Phone list collection: {}", phone_list_collection_name);
+    println!("    Total phones: {}", final_list_count);
+    println!("    Complete: {}", complete_count);
+    println!("    Incomplete: {}", final_list_count - complete_count);
     println!("\nHybrid Method:");
     println!("  Alternating: {} rate-limited + {} ScrapingBee per batch", batch_size, batch_size);
     println!("  This saves API credits while maintaining speed");
